@@ -783,14 +783,14 @@ static void handle_message(led_cfg_t cfg[3], const led_msg_t *msg, uint32_t now,
 static void led_task(void *arg)
 {
     (void)arg;
-    led_cfg_t cfg[3]      = {{APP_PATTERN_HEARTBEAT, LED_DEFAULT_LED1_PERIOD, 0U}, {APP_PATTERN_OFF, LED_DEFAULT_LED2_PERIOD, 0U}, {APP_PATTERN_OFF, LED_DEFAULT_LED2_PERIOD, 0U}};
-    uint32_t  now         = xTaskGetTickCount();
-    cfg[0].start          = now;
-    cfg[1].start          = now;
-    cfg[2].start          = now;
-    uint32_t error_flags  = app_error_flags;
-    uint32_t last_checkin = now;
-    task_report_t report  = {0U, 0U};
+    led_cfg_t cfg[3]           = {{APP_PATTERN_HEARTBEAT, LED_DEFAULT_LED1_PERIOD, 0U}, {APP_PATTERN_OFF, LED_DEFAULT_LED2_PERIOD, 0U}, {APP_PATTERN_OFF, LED_DEFAULT_LED2_PERIOD, 0U}};
+    uint32_t  now              = xTaskGetTickCount();
+    cfg[0].start               = now;
+    cfg[1].start               = now;
+    cfg[2].start               = now;
+    uint32_t      error_flags  = app_error_flags;
+    uint32_t      last_checkin = now;
+    task_report_t report       = {0U, 0U};
 
     for(;;)
     {

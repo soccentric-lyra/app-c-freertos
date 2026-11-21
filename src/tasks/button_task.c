@@ -236,15 +236,15 @@ void EXTI15_10_IRQHandler(void)
 static void button_task(void *arg)
 {
     (void)arg;
-    uint32_t now             = xTaskGetTickCount();
-    bool     stable          = button_raw();
-    bool     candidate       = stable;
-    uint32_t candidate_since = now;
-    uint32_t press_start     = now;
-    bool     pressed         = stable;
-    bool     long_sent       = false;
-    uint32_t last_checkin    = now;
-    task_report_t report     = {0U, 0U};
+    uint32_t      now             = xTaskGetTickCount();
+    bool          stable          = button_raw();
+    bool          candidate       = stable;
+    uint32_t      candidate_since = now;
+    uint32_t      press_start     = now;
+    bool          pressed         = stable;
+    bool          long_sent       = false;
+    uint32_t      last_checkin    = now;
+    task_report_t report          = {0U, 0U};
 
     for(;;)
     {

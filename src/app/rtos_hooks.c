@@ -62,7 +62,4 @@ void vApplicationStackOverflowHook(TaskHandle_t task, char *name)
  * @warning @c line is a byte count here but a source line for
  *          @c APP_FAULT_ASSERT; check @c reason first.
  */
-void vApplicationMallocFailedHook(void)
-{
-    app_fault_fatal(APP_FAULT_MALLOC_FAILED, current_task_name(), "malloc", (uint32_t)xPortGetFreeHeapSize());
-}
+void vApplicationMallocFailedHook(void) { app_fault_fatal(APP_FAULT_MALLOC_FAILED, current_task_name(), "malloc", (uint32_t)xPortGetFreeHeapSize()); }
