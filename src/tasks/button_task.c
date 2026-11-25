@@ -31,6 +31,7 @@
 #include "tasks/health_task.h"
 #include "tasks/led_task.h"
 #include "tasks/button_task.h"
+#include "tasks/button_logic.h"
 
 #define BUTTON_TASK_STACK_WORDS 384U /**< Stack depth in words, sized for app_log(). */
 
@@ -41,27 +42,8 @@
  */
 #define BUTTON_TASK_PRIORITY (tskIDLE_PRIORITY + 3U)
 
-/**
- * @brief Debounce interval in milliseconds (30 ms).
- * @details A candidate level must differ from the accepted level for this
- *          long before it becomes stable.  The comparison uses tick deltas,
- *          so the interval is rounded up to whole 1 ms ticks.
- */
-#define BUTTON_DEBOUNCE_MS 30U
 
-/**
- * @brief Upper bound of a short press in milliseconds, exclusive.
- * @details A release with a debounced duration below 1000 ms posts a short
- *          press request; exactly 1000 ms is no longer short.
- */
-#define BUTTON_SHORT_MAX_MS 1000U
 
-/**
- * @brief Threshold of a long press in milliseconds, inclusive.
- * @details A press still held at 2000 ms is reported once as a long press
- *          and is not reported again on release.
- */
-#define BUTTON_LONG_MS 2000U
 
 /**
  * @brief Health check-in period in milliseconds (500 ms).
@@ -236,15 +218,12 @@ void EXTI15_10_IRQHandler(void)
 static void button_task(void *arg)
 {
     (void)arg;
-    uint32_t      now             = xTaskGetTickCount();
-    bool          stable          = button_raw();
-    bool          candidate       = stable;
-    uint32_t      candidate_since = now;
-    uint32_t      press_start     = now;
-    bool          pressed         = stable;
-    bool          long_sent       = false;
-    uint32_t      last_checkin    = now;
-    task_report_t report          = {0U, 0U};
+    uint32_t       now          = xTaskGetTickCount();
+    button_state_t button_state;
+    uint32_t       last_checkin = now;
+    task_report_t  report       = {0U, 0U};
+
+    button_logic_init(&button_state, button_raw(), now);
 
     for(;;)
     {
@@ -253,42 +232,14 @@ static void button_task(void *arg)
         now      = xTaskGetTickCount();
         bool raw = button_raw();
 
-        if(raw != candidate)
+        button_event_t event = button_logic_update(&button_state, raw, now);
+        if(event == BUTTON_EVENT_SHORT)
         {
-            candidate       = raw;
-            candidate_since = now;
+            LOG_I("button: short press, next LED pattern");
+            (void)led_post_button(1U);
         }
-        else if(candidate != stable && (now - candidate_since) >= BUTTON_DEBOUNCE_MS)
+        else if(event == BUTTON_EVENT_LONG)
         {
-            stable = candidate;
-            if(stable)
-            {
-                pressed     = true;
-                long_sent   = false;
-                press_start = now;
-            }
-            else
-            {
-                uint32_t duration = now - press_start;
-                if(pressed && !long_sent)
-                {
-                    if(duration < BUTTON_SHORT_MAX_MS)
-                    {
-                        LOG_I("button: short press, next LED pattern");
-                        (void)led_post_button(1U);
-                    }
-                    else if(duration >= BUTTON_LONG_MS)
-                    {
-                        (void)led_post_button(2U);
-                    }
-                }
-                pressed = false;
-            }
-        }
-
-        if(pressed && !long_sent && (now - press_start) >= BUTTON_LONG_MS)
-        {
-            long_sent = true;
             LOG_I("button: long press, default LED patterns");
             (void)led_post_button(2U);
         }

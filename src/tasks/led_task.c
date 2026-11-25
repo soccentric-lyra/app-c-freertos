@@ -10,7 +10,7 @@
  *          state of one LED is a @ref led_cfg_t that holds the pattern, the
  *          configured period and the tick at which the current cycle phase
  *          was anchored.
- *          @ref evaluate derives the level from the elapsed ticks
+ *          @ref led_pattern_evaluate derives the level from the elapsed ticks
  *          (@c now - start) modulo the cycle length and returns the ticks
  *          remaining until the next segment boundary, so the task sleeps
  *          exactly to the next edge instead of polling at a fixed rate
@@ -53,13 +53,14 @@
 #include "tasks/comms_task.h"
 #include "tasks/health_task.h"
 #include "tasks/led_task.h"
+#include "tasks/led_pattern.h"
 
 /**
  * @brief Stack depth of the LED task in words (384 words, 1536 bytes).
  * @details Sized for the deepest call chain, @ref led_task ->
  *          @ref handle_message -> (@ref apply_set or
  *          @ref send_button_event), plus the 60 bytes of segment arrays that
- *          @ref evaluate keeps on the stack.
+ *          @ref led_pattern_evaluate keeps on the stack.
  * @note Passed as the @c usStackDepth argument of @c xTaskCreate in
  *       @ref led_task_create; FreeRTOS scales it by the 4-byte stack width.
  */
@@ -129,17 +130,6 @@
  */
 #define LED_DEFAULT_LED2_PERIOD 1000U
 
-/**
- * @brief Sentinel delay meaning "no segment boundary to wait for".
- * @details Returned through @c next_ms by @ref evaluate for
- *          @ref APP_PATTERN_OFF, @ref APP_PATTERN_ON and for a cycle whose
- *          segments sum to zero, and used to seed the three delays in
- *          @ref led_task.  It is the largest @c uint32_t so that the
- *          @c if (next < wait) comparisons can never select it.
- * @warning It is not a duration: never pass it to a delay and never add to
- *          it.
- */
-#define NO_TRANSITION 0xFFFFFFFFUL
 
 /**
  * @brief Message opcodes understood by @ref handle_message.
@@ -187,24 +177,6 @@ typedef struct
     bool     force;   /**< Allow LD3 override for @ref LED_MSG_SET. */
 } led_msg_t;
 
-/**
- * @brief Pattern state of one LED.
- * @details Holds the configuration applied by @ref apply_set plus the tick
- *          that anchors the current cycle.  @ref evaluate never modifies the
- *          structure; it derives the level and the time to the next edge from
- *          @c start and the current tick count, so a pattern keeps its phase
- *          and only a new request rewrites @c pattern, @c period and
- *          @c start.
- * @note @c start is a raw tick count.  The unsigned difference
- *       @c now - start remains correct across the 32-bit tick wrap (about
- *       49.7 days) and also when @c start lies ahead of @c now.
- */
-typedef struct
-{
-    uint8_t  pattern; /**< One of the APP_PATTERN_* identifiers. */
-    uint16_t period;  /**< Configured cycle length in milliseconds. */
-    uint32_t start;   /**< Tick at which the current cycle phase began. */
-} led_cfg_t;
 
 /**
  * @brief Handle of the LED message queue.
@@ -219,22 +191,6 @@ typedef struct
  */
 static QueueHandle_t led_queue;
 
-/**
- * @brief Advance a pattern identifier to the next one in wrap order.
- * @details Implements the short-press cycle OFF -> ON -> BLINK -> HEARTBEAT
- *          -> FAST -> CHASE -> MORSE_SOS -> OFF that BTN-002 requires.
- *
- * @param[in] current Pattern identifier the LED currently uses.
- *
- * @return The next pattern identifier, wrapping to @ref APP_PATTERN_OFF.
- *
- * @note The modulo uses @ref APP_PATTERN_COUNT, so an out-of-range
- *       @p current still yields a valid identifier instead of being
- *       rejected.
- * @note Task context only; called from @ref handle_message.
- * @see led_post_button
- */
-static uint32_t next_pattern(uint32_t current) { return (current + 1U) % APP_PATTERN_COUNT; }
 
 /**
  * @brief Drive one LED pin through the port's BSRR register.
@@ -257,276 +213,7 @@ static uint32_t next_pattern(uint32_t current) { return (current + 1U) % APP_PAT
  */
 static void led_write(GPIO_TypeDef *port, uint32_t pin, bool on) { port->BSRR = on ? pin : (pin << 16U); }
 
-/**
- * @brief Expand a pattern into its list of on/off segments.
- * @details Fills the two parallel arrays with the durations and levels of one
- *          complete cycle.  @p dur and @p on are written in lockstep, the
- *          segments are concatenated in array order and the cycle repeats
- *          from index 0.  The expansion is:
- *
- *          - @ref APP_PATTERN_OFF - no segment at all, the cycle is empty.
- *          - @ref APP_PATTERN_ON - one 65535 ms segment, always on.
- *          - @ref APP_PATTERN_BLINK - @c period/2 on, then the remainder off.
- *          - @ref APP_PATTERN_FAST - a cycle of @c period/5 (at least 2 ms)
- *            split into @c cycle/2 on and the remainder off.
- *          - @ref APP_PATTERN_HEARTBEAT - 50 ms on, 150 ms off, 50 ms on and
- *            then off for the rest of the cycle, where the cycle is at least
- *            250 ms because a shorter period is clamped up.
- *          - @ref APP_PATTERN_CHASE - one LED lit for half the period and
- *            dark for the other half; @p second_led selects which half LD2
- *            uses, so the two LEDs of the pair alternate.
- *          - @ref APP_PATTERN_MORSE_SOS and every unknown value - the fixed
- *            18-segment SOS rhythm with a 100 ms unit and a 700 ms word gap,
- *            3400 ms in total.
- *
- * @param[in]  cfg        LED configuration supplying pattern and period.
- * @param[in]  second_led @c false for the LD1/LD3 phase, @c true for LD2,
- *                        which inverts the CHASE half.
- * @param[out] dur        Segment durations in milliseconds; the first @c n
- *                        entries are written.
- * @param[out] on         Segment levels; the first @c n entries are written.
- *
- * @return Number of segments written, between 0 and 18.
- *
- * @pre Both arrays hold at least 20 entries; @ref evaluate supplies them as
- *      local @c uint16_t[20] and @c bool[20].
- * @post Entries at and beyond the return value are untouched.
- * @note Durations are truncated to @c uint16_t.  That is lossless for a valid
- *       period, because the largest derived value is
- *       @ref APP_LED_MAX_PERIOD and the single ON segment is 65535 ms.
- * @note The OFF and ON cases are only reachable when the function is called
- *       directly; @ref evaluate short-circuits both.  They exist so that the
- *       expansion is total for every pattern identifier.
- */
-static uint32_t segments_for(const led_cfg_t *cfg, bool second_led, uint16_t dur[20], bool on[20])
-{
-    uint32_t n      = 0U;
-    uint32_t period = cfg->period;
 
-    switch(cfg->pattern)
-    {
-    case APP_PATTERN_OFF: break;
-
-    case APP_PATTERN_ON:
-        dur[n] = 0xFFFFU;
-        on[n]  = true;
-        n++;
-        break;
-
-    case APP_PATTERN_BLINK:
-        dur[n] = (uint16_t)(period / 2U);
-        on[n]  = true;
-        n++;
-        dur[n] = (uint16_t)(period - (period / 2U));
-        on[n]  = false;
-        n++;
-        break;
-
-    case APP_PATTERN_FAST:
-    {
-        uint32_t fast = period / 5U;
-        if(fast < 2U)
-        {
-            fast = 2U;
-        }
-        dur[n] = (uint16_t)(fast / 2U);
-        on[n]  = true;
-        n++;
-        dur[n] = (uint16_t)(fast - (fast / 2U));
-        on[n]  = false;
-        n++;
-        break;
-    }
-
-    case APP_PATTERN_HEARTBEAT:
-    {
-        uint32_t cycle = period < 250U ? 250U : period;
-        dur[n]         = 50U;
-        on[n]          = true;
-        n++;
-        dur[n] = 150U;
-        on[n]  = false;
-        n++;
-        dur[n] = 50U;
-        on[n]  = true;
-        n++;
-        if(cycle > 250U)
-        {
-            dur[n] = (uint16_t)(cycle - 250U);
-            on[n]  = false;
-            n++;
-        }
-        break;
-    }
-
-    case APP_PATTERN_CHASE:
-    {
-        uint32_t half = period / 2U;
-        if(second_led)
-        {
-            dur[n] = (uint16_t)half;
-            on[n]  = false;
-            n++;
-            dur[n] = (uint16_t)(period - half);
-            on[n]  = true;
-        }
-        else
-        {
-            dur[n] = (uint16_t)half;
-            on[n]  = true;
-            n++;
-            dur[n] = (uint16_t)(period - half);
-            on[n]  = false;
-        }
-        n++;
-        break;
-    }
-
-    case APP_PATTERN_MORSE_SOS:
-    default:
-        /* ... --- ...  with a 100 ms unit. */
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 300U;
-        on[n]  = false;
-        n++;
-        dur[n] = 300U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 300U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 300U;
-        on[n]  = true;
-        n++;
-        dur[n] = 300U;
-        on[n]  = false;
-        n++;
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 100U;
-        on[n]  = false;
-        n++;
-        dur[n] = 100U;
-        on[n]  = true;
-        n++;
-        dur[n] = 700U;
-        on[n]  = false;
-        n++;
-        break;
-    }
-
-    return n;
-}
-
-/**
- * @brief Compute the LED level now and the delay to the next segment edge.
- * @details The cycle position is @c (now - cfg->start) % cycle, so the phase
- *          is a pure function of the tick count and never drifts: preemption,
- *          a late wake-up or a rolled-over tick counter changes when the
- *          function runs, not which segment is active.  The function walks the
- *          segment list, skipping zero-length entries, until it finds the
- *          segment that contains the position; the time left in that segment
- *          becomes the delay.  The cost is O(segments), at most 18 iterations.
- *
- *          OFF and ON are handled before the walk because neither has a
- *          boundary to wait for, and a pattern whose segments sum to zero
- *          falls back to dark plus @ref NO_TRANSITION.
- *
- * @param[in]  cfg        LED configuration, including the cycle anchor.
- * @param[in]  second_led @c false for the LD1/LD3 phase, @c true for LD2,
- *                        which inverts the CHASE half.
- * @param[in]  now        Current tick count from @c xTaskGetTickCount().
- * @param[out] level      @c true when the LED is lit in the current segment.
- * @param[out] next_ms    Delay from @p now to the next segment edge, in
- *                        ticks, or @ref NO_TRANSITION when there is none.
- *
- * @pre @c cfg::start was set to a tick count, normally the tick at which the
- *      pattern was applied.
- * @post Both output parameters are always written.
- * @note The unit is ticks; it equals milliseconds only because the tick rate
- *       is 1000 Hz (DRT-001).  The caller compares the value against a
- *       millisecond budget directly.
- * @note Task context only.
- * @see segments_for
- */
-static void evaluate(const led_cfg_t *cfg, bool second_led, uint32_t now, bool *level, uint32_t *next_ms)
-{
-    uint16_t dur[20];
-    bool     on[20];
-
-    if(cfg->pattern == APP_PATTERN_OFF)
-    {
-        *level   = false;
-        *next_ms = NO_TRANSITION;
-        return;
-    }
-    if(cfg->pattern == APP_PATTERN_ON)
-    {
-        *level   = true;
-        *next_ms = NO_TRANSITION;
-        return;
-    }
-
-    uint32_t count = segments_for(cfg, second_led, dur, on);
-    uint32_t cycle = 0U;
-    for(uint32_t i = 0U; i < count; i++)
-    {
-        cycle += dur[i];
-    }
-    if(cycle == 0U)
-    {
-        *level   = false;
-        *next_ms = NO_TRANSITION;
-        return;
-    }
-
-    uint32_t pos = (now - cfg->start) % cycle;
-    uint32_t acc = 0U;
-    for(uint32_t i = 0U; i < count; i++)
-    {
-        if(dur[i] == 0U)
-        {
-            continue;
-        }
-        if(pos < (acc + dur[i]))
-        {
-            *level   = on[i];
-            *next_ms = (acc + dur[i]) - pos;
-            return;
-        }
-        acc += dur[i];
-    }
-
-    *level   = false;
-    *next_ms = cycle - pos;
-}
 
 /**
  * @brief Report a button-driven pattern change to the Comms task.
@@ -580,7 +267,7 @@ static void send_button_event(uint8_t press, uint8_t pattern, uint16_t period) {
  * @warning Validation is the producer's job: Comms rejects patterns outside
  *          @ref APP_PATTERN_OFF .. @ref APP_PATTERN_MORSE_SOS and periods
  *          outside @ref APP_LED_MIN_PERIOD .. @ref APP_LED_MAX_PERIOD, while
- *          @ref evaluate maps an unknown pattern to the SOS rhythm.
+ *          @ref led_pattern_evaluate maps an unknown pattern to the SOS rhythm.
  * @note Task context only.
  */
 static void apply_set(led_cfg_t cfg[3], uint8_t led, uint8_t pattern, uint16_t period, uint32_t now)
@@ -643,7 +330,7 @@ static void apply_set(led_cfg_t cfg[3], uint8_t led, uint8_t pattern, uint16_t p
  *          - @ref LED_MSG_BUTTON with @c press == 2 restores the defaults
  *            (LD1 heartbeat, LD2 off, both at their default periods) and
  *            reports the reset.  Any other value is a short press: LD1
- *            advances one pattern via @ref next_pattern, keeps its stored
+ *            advances one pattern via @ref led_pattern_next, keeps its stored
  *            period when that period lies inside @ref APP_LED_MIN_PERIOD ..
  *            @ref APP_LED_MAX_PERIOD and otherwise falls back to
  *            @ref LED_DEFAULT_LED1_PERIOD, LD2 is given the same pattern and
@@ -710,7 +397,7 @@ static void handle_message(led_cfg_t cfg[3], const led_msg_t *msg, uint32_t now,
             {
                 period = LED_DEFAULT_LED1_PERIOD;
             }
-            uint8_t pattern = (uint8_t)next_pattern(cfg[0].pattern);
+            uint8_t pattern = (uint8_t)led_pattern_next(cfg[0].pattern);
             apply_set(cfg, APP_LED_ID_1, pattern, period, now);
             cfg[1].pattern = pattern;
             cfg[1].period  = period;
@@ -771,7 +458,7 @@ static void handle_message(led_cfg_t cfg[3], const led_msg_t *msg, uint32_t now,
  * @note The wait is bounded from above by @ref LED_CHECKIN_MS and clamped from
  *       below at one tick, so the task wakes at least twice per second and
  *       never spins on a zero timeout.
- * @note Because @ref evaluate derives the level from the absolute tick count,
+ * @note Because @ref led_pattern_evaluate derives the level from the absolute tick count,
  *       a long preemption or a late wake-up still shows the correct level; it
  *       only removes the overshoot from a segment.
  * @note Handling a button message never blocks: @ref comms_post_button_event
@@ -800,12 +487,12 @@ static void led_task(void *arg)
         bool     led1_on = false;
         bool     led2_on = false;
         bool     led3_on = false;
-        uint32_t next1   = NO_TRANSITION;
-        uint32_t next2   = NO_TRANSITION;
-        uint32_t next3   = NO_TRANSITION;
+        uint32_t next1   = LED_PATTERN_NO_TRANSITION;
+        uint32_t next2   = LED_PATTERN_NO_TRANSITION;
+        uint32_t next3   = LED_PATTERN_NO_TRANSITION;
 
-        evaluate(&cfg[0], false, now, &led1_on, &next1);
-        evaluate(&cfg[1], true, now, &led2_on, &next2);
+        led_pattern_evaluate(&cfg[0], false, now, &led1_on, &next1);
+        led_pattern_evaluate(&cfg[1], true, now, &led2_on, &next2);
 
         if((error_flags & APP_ERROR_HEALTH) != 0U)
         {
@@ -816,11 +503,11 @@ static void led_task(void *arg)
         else if((error_flags & (APP_ERROR_FAULT | APP_ERROR_WATCHDOG)) != 0U)
         {
             led3_on = true;
-            next3   = NO_TRANSITION;
+            next3   = LED_PATTERN_NO_TRANSITION;
         }
         else
         {
-            evaluate(&cfg[2], false, now, &led3_on, &next3);
+            led_pattern_evaluate(&cfg[2], false, now, &led3_on, &next3);
         }
 
         led_write(APP_LED1_PORT, APP_LED1_PIN, led1_on);

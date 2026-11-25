@@ -165,7 +165,9 @@ set(PROJECT_SOURCES
     src/app/handover.c
     # FreeRTOS tasks
     src/tasks/led_task.c
+    src/tasks/led_pattern.c
     src/tasks/button_task.c
+    src/tasks/button_logic.c
     src/tasks/health_task.c
     src/tasks/comms_task.c
     # Drivers and platform bring-up
