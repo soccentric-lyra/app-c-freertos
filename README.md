@@ -73,6 +73,9 @@ Activate: ok, device is resetting
 ```bash
 scripts/docker-dev.sh build   # build the stm32-dev container image once
 scripts/build.sh              # build inside the container
+make test-host                # host unit tests (CRC, HWLINK, LED, button)
+make cppcheck                 # cppcheck static analysis
+make boot-contract            # check the BOOT layout constants
 make flash                    # upload build/demo.img through the bootloader
 make help                     # list all targets
 ```
