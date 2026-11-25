@@ -1,5 +1,7 @@
 # app-c-freertos
 
+[![CI](https://github.com/soccentric-stm32/app-c-freertos/actions/workflows/ci.yml/badge.svg)](https://github.com/soccentric-stm32/app-c-freertos/actions/workflows/ci.yml)
+
 A FreeRTOS demo application in C for the NUCLEO-F767ZI that runs under the A/B bootloader. It drives the on-board LEDs in selectable patterns, reads the user button, talks to the desktop GUI over UART with the HWLINK protocol, supervises its tasks with the watchdog and confirms itself to the bootloader after a health check. It is the reference implementation that the Rust and Zephyr versions match, and the template for starting a new product application on this platform.
 
 ## Debug terminal
@@ -39,6 +41,11 @@ Activate: ok, device is resetting
 ```
 
 </details>
+
+## Documentation
+
+- [Architecture](docs/architecture.md): task model, memory map, boot hand-over and HWLINK flow
+- [API reference](https://soccentric-stm32.github.io/app-c-freertos/): Doxygen output published from `master`
 
 ## Features
 
@@ -104,7 +111,7 @@ folder name tells you which layer a module belongs to.
 
 - [bootloader](https://github.com/soccentric-stm32/bootloader) — A/B bootloader with UART update, CRC32 checks, trial boot and rollback
 - [app-c-zephyr](https://github.com/soccentric-stm32/app-c-zephyr) — Demo application in C on Zephyr RTOS
-- [app-rust-freertos](https://github.com/soccentric-stm32/app-rust-freertos) — Demo application in Rust on Embassy
+- [app-rust-freertos](https://github.com/soccentric-stm32/app-rust-freertos) — Demo application in Rust on FreeRTOS
 - [app-rust-zephyr](https://github.com/soccentric-stm32/app-rust-zephyr) — Demo application in Rust on Zephyr RTOS
 - [validation-firmware](https://github.com/soccentric-stm32/validation-firmware) — HWVAL hardware validation firmware
 - [validation-gui](https://github.com/soccentric-stm32/validation-gui) — HWVAL Studio: desktop GUI for tests, updates and flashing

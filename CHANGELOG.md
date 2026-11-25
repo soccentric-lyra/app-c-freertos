@@ -8,6 +8,27 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Host unit tests for CRC-32/ISO-HDLC and the COBS/HWLINK framing layer,
+  runnable with `make test-host`, with a gcov coverage mode
+- `cppcheck` static analysis target and a GitHub Actions workflow for host
+  tests, firmware build, strict lint and footprint
+- Doxygen output published to GitHub Pages by a second workflow
+- `docs/architecture.md`: task model, flash/RAM map, boot hand-over and
+  HWLINK sequence
+- `scripts/check_boot_contract.py`, shared by Jenkins and GitHub Actions
+
+### Changed
+
+- The Jenkins boot-contract stage now calls the shared script instead of
+  embedding a second copy of the expected layout
+
+### Fixed
+
+- The README described `app-rust-freertos` as "Rust on Embassy"; it is Rust
+  on FreeRTOS
+
 ## [1.0.0] - 2026-11-19
 
 ### Added

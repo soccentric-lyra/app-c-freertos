@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host tests and static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cppcheck
+
+      - name: Boot contract
+        run: ./scripts/check_boot_contract.py
+
+      - name: Host unit tests with coverage
+        run: ./scripts/test-host.sh --coverage
+
+      - name: cppcheck
+        run: ./scripts/cppcheck.sh
+
+  firmware:
+    name: Firmware build, lint and footprint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build toolchain image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: stm32-dev:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build firmware
+        run: make build
+
+      - name: Static analysis (strict)
+        run: make lint-strict
+
+      - name: Boot contract
+        run: make boot-contract
+
+      - name: Show firmware size
+        run: make size
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-c-freertos-image
+          path: |
+            build/demo.img
+            build/app.elf
+            build/app.map
+          if-no-files-found: error
