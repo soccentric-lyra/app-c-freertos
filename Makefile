@@ -21,6 +21,10 @@
 #   make serial         serial console on the ST-LINK VCP (115200 8N1)
 #   make lint           clang-tidy static analysis
 #   make lint-strict    clang-tidy, failing on any finding
+#   make cppcheck       cppcheck static analysis (host tool)
+#   make boot-contract  check the BOOT layout constants (host Python)
+#   make test-host      build and run the portable host unit tests
+#   make coverage-host  run the host tests with gcov coverage
 #   make format         format src/ and board/ with clang-format
 #   make probe          detect the ST-LINK and the target chip
 #   make size           show the firmware size
@@ -97,8 +101,9 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build configure clean rebuild lint lint-strict format flash \
-        erase-all reset debug gdbserver serial probe size docs image help
+.PHONY: all build configure clean rebuild lint lint-strict cppcheck boot-contract \
+        test-host coverage-host format flash erase-all reset debug gdbserver \
+        serial probe size docs image help
 
 all: build
 
@@ -129,6 +134,22 @@ lint: configure
 lint-strict:
 	$(DEV) run cmake -S /work -B /work/$(BUILD_DIR) -G Ninja -DAPP_LINT_STRICT=ON
 	$(DEV) run cmake --build /work/$(BUILD_DIR) --target clang-tidy
+
+# cppcheck is a host tool (scripts/install-tools.sh), like clang-format.
+cppcheck:
+	@command -v cppcheck >/dev/null 2>&1 || { \
+		echo "error: cppcheck not installed"; exit 1; }
+	scripts/cppcheck.sh
+
+boot-contract:
+	$(PYTHON) scripts/check_boot_contract.py
+
+# Host tests cover crc32 and HWLINK framing without Docker or an ARM toolchain.
+test-host:
+	scripts/test-host.sh
+
+coverage-host:
+	scripts/test-host.sh --coverage
 
 # clang-format is a host tool (scripts/install-tools.sh), like doxygen.
 format:

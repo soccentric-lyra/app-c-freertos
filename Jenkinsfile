@@ -89,40 +89,7 @@ pipeline {
 
         stage('Boot contract') {
             steps {
-                sh '''
-                    scripts/docker-dev.sh run python3 - <<'PY'
-from pathlib import Path
-
-# Values shared with bootloader (LAY-001..LAY-005, HND-003,
-# Appendix B). If this stage fails, the application and BOOT have drifted.
-expected = {
-    "APP_SLOT_BASE": 0x0800C000,
-    "APP_SLOT_SIZE": 0x000F4000,
-    "APP_META_A_ADDR": 0x08008000,
-    "APP_META_B_ADDR": 0x08108000,
-    "APP_META_VERIFIED_OFFSET": 0x100,
-    "APP_META_ACTIVATED_OFFSET": 0x120,
-    "APP_META_CONFIRMED_OFFSET": 0x140,
-    "APP_META_REJECTED_OFFSET": 0x160,
-}
-
-defines = {}
-for line in Path("src/services/boot_contract.h").read_text(encoding="utf-8").splitlines():
-    parts = line.split()
-    if len(parts) >= 3 and parts[0] == "#define":
-        defines[parts[1]] = parts[2]
-
-for name, want in expected.items():
-    if name not in defines:
-        raise SystemExit(f"boot contract: {name} is missing from src/services/boot_contract.h")
-    raw = defines[name].rstrip("ULul").rstrip("ULul")
-    got = int(raw, 16)
-    if got != want:
-        raise SystemExit(f"boot contract: {name} is 0x{got:08X}, expected 0x{want:08X}")
-
-print("boot contract: slot, metadata and record offsets match the BOOT layout")
-PY
-                '''
+                sh 'scripts/docker-dev.sh run python3 scripts/check_boot_contract.py'
             }
         }
 
