@@ -32,8 +32,12 @@ SOURCES=(
     tests/host/test_main.c
     tests/host/test_crc32.c
     tests/host/test_hwlink.c
+    tests/host/test_led_pattern.c
+    tests/host/test_button_logic.c
     src/services/crc32.c
     src/protocol/hwlink.c
+    src/tasks/led_pattern.c
+    src/tasks/button_logic.c
 )
 
 if [[ "$COVERAGE" == "0" ]]; then
@@ -71,9 +75,11 @@ done
 "$COV/host-tests"
 gcov -b -c -o "$COV" \
     src/services/crc32.c \
-    src/protocol/hwlink.c >/dev/null
+    src/protocol/hwlink.c \
+    src/tasks/led_pattern.c \
+    src/tasks/button_logic.c >/dev/null
 mv ./*.gcov "$COV"/
-for report in crc32.c.gcov hwlink.c.gcov; do
+for report in crc32.c.gcov hwlink.c.gcov led_pattern.c.gcov button_logic.c.gcov; do
     if [[ -f "$COV/$report" ]]; then
         printf '\n== %s ==\n' "$report"
         awk -F: '/^ *[0-9#-]+:/ { lines++; if ($1 !~ /#####/) hit++ } END { printf "lines: %d, hit: %d\n", lines, hit }' "$COV/$report"

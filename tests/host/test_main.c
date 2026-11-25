@@ -45,6 +45,8 @@ int main(void)
     } suites[] = {
         {"crc32", test_crc32},
         {"hwlink", test_hwlink},
+        {"led_pattern", test_led_pattern},
+        {"button_logic", test_button_logic},
     };
 
     for(size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i++)

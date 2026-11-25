@@ -187,8 +187,10 @@ before the scheduler starts.
 | Health, watchdog and confirmation | `src/tasks/health_task.c` |
 | HWLINK framing | `src/protocol/hwlink.c`, `src/protocol/hwlink.h` |
 | HWLINK commands | `src/tasks/comms_task.c` |
-| LED pattern engine | `src/tasks/led_task.c` |
-| Button debounce | `src/tasks/button_task.c` |
+| LED pattern engine | `src/tasks/led_pattern.c` |
+| LED task and GPIO | `src/tasks/led_task.c` |
+| Button debounce logic | `src/tasks/button_logic.c` |
+| Button task and EXTI | `src/tasks/button_task.c` |
 | Fault record | `src/services/app_fault.c` |
-| Host tests | `tests/host/` |
+| Host tests (CRC, HWLINK, LED patterns, button) | `tests/host/` |
 | Boot contract check | `scripts/check_boot_contract.py` |

@@ -71,5 +71,9 @@ typedef int (*test_fn)(void);
 int test_crc32(void);
 /** @brief HWLINK framing test suite. */
 int test_hwlink(void);
+/** @brief LED pattern engine test suite. */
+int test_led_pattern(void);
+/** @brief Button debounce test suite. */
+int test_button_logic(void);
 
 #endif /* TEST_H */
