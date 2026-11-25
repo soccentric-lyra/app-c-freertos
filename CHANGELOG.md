@@ -11,7 +11,8 @@ and this project adheres to
 ### Added
 
 - Host unit tests for CRC-32/ISO-HDLC and the COBS/HWLINK framing layer,
-  runnable with `make test-host`, with a gcov coverage mode
+  runnable with `make test-host`, with a gcov coverage mode and an
+  AddressSanitizer/UndefinedBehaviorSanitizer run
 - `cppcheck` static analysis target and a GitHub Actions workflow for host
   tests, firmware build, strict lint and footprint
 - Doxygen output published to GitHub Pages by a second workflow

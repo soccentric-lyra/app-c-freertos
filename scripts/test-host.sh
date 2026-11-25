@@ -40,6 +40,20 @@ if [[ "$COVERAGE" == "0" ]]; then
     # shellcheck disable=SC2086
     "$CC" $CFLAGS -Isrc "${SOURCES[@]}" -o "$OUT/host-tests"
     "$OUT/host-tests"
+
+    # ASan/UBSan catch buffer overruns and undefined shifts in the framing
+    # code without any firmware or hardware.  Skip only when the host
+    # compiler does not support the sanitizers (for example a minimal CI
+    # image); the normal run above has already passed.
+    if printf 'int main(void) { return 0; }\n' \
+        | "$CC" -x c -fsanitize=address,undefined -o "$OUT/sanitize-probe" - \
+            >/dev/null 2>&1; then
+        rm -f "$OUT/sanitize-probe"
+        # shellcheck disable=SC2086
+        "$CC" $CFLAGS -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Isrc "${SOURCES[@]}" -o "$OUT/host-tests-sanitize"
+        ASAN_OPTIONS=detect_leaks=0 "$OUT/host-tests-sanitize"
+    fi
     exit 0
 fi
 
